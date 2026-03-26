@@ -7,7 +7,10 @@ const {
   createPlatformAdmin,
   inviteInsurerAdmin,
   inviteInsurerAgent,
-  acceptInvitation
+  acceptInvitation,
+  login,
+  refreshToken,
+  logout
 } = require('../controllers/authController');
 const { authenticate, authorize } = require('../middleware/auth');
 
@@ -62,6 +65,51 @@ router.post(
       })
   ],
   register
+);
+
+/**
+ * @route   POST /api/auth/login
+ * @desc    Login user with email and password
+ * @access  Public
+ */
+router.post(
+  '/login',
+  [
+    body('email')
+      .isEmail()
+      .withMessage('Please provide a valid email address')
+      .normalizeEmail(),
+    body('password')
+      .notEmpty()
+      .withMessage('Password is required')
+  ],
+  login
+);
+
+/**
+ * @route   POST /api/auth/refresh-token
+ * @desc    Refresh access token using refresh token
+ * @access  Public
+ */
+router.post(
+  '/refresh-token',
+  [
+    body('refreshToken')
+      .notEmpty()
+      .withMessage('Refresh token is required')
+  ],
+  refreshToken
+);
+
+/**
+ * @route   POST /api/auth/logout
+ * @desc    Logout user and invalidate refresh token
+ * @access  Private
+ */
+router.post(
+  '/logout',
+  authenticate,
+  logout
 );
 
 /**
