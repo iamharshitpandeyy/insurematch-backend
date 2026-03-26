@@ -399,8 +399,176 @@ const sendInvitationEmail = async (email, name, invitationLink, roleType) => {
   }
 };
 
+/**
+ * Send session expiry warning email to user
+ * @param {string} email - Recipient email address
+ * @param {string} name - Recipient name
+ * @param {number} timeUntilExpiry - Time until session expires (in seconds)
+ * @returns {Promise<Object>} - Result of email send operation
+ */
+const sendSessionExpiryWarningEmail = async (email, name, timeUntilExpiry) => {
+  try {
+    const transporter = createTransporter();
+
+    // Convert seconds to minutes for display
+    const minutesUntilExpiry = Math.ceil(timeUntilExpiry / 60);
+
+    const mailOptions = {
+      from: `"InsureMatch" <${process.env.EMAIL_FROM || 'noreply@insurematch.com'}>`,
+      to: email,
+      subject: 'Session Expiry Warning - InsureMatch',
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              line-height: 1.6;
+              color: #333;
+            }
+            .container {
+              max-width: 600px;
+              margin: 0 auto;
+              padding: 20px;
+            }
+            .header {
+              background-color: #ff9800;
+              color: white;
+              padding: 20px;
+              text-align: center;
+            }
+            .content {
+              background-color: #f9f9f9;
+              padding: 30px;
+              border-radius: 5px;
+              margin-top: 20px;
+            }
+            .warning-box {
+              background-color: #fff3cd;
+              border-left: 4px solid #ff9800;
+              padding: 15px;
+              margin: 20px 0;
+            }
+            .button {
+              display: inline-block;
+              padding: 12px 24px;
+              background-color: #4CAF50;
+              color: white;
+              text-decoration: none;
+              border-radius: 5px;
+              margin: 20px 0;
+              font-weight: bold;
+            }
+            .footer {
+              text-align: center;
+              margin-top: 30px;
+              font-size: 12px;
+              color: #666;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>⏰ Session Expiry Warning</h1>
+            </div>
+            <div class="content">
+              <p>Hi ${name},</p>
+              <p>This is a friendly reminder that your InsureMatch session is about to expire.</p>
+
+              <div class="warning-box">
+                <strong>⚠️ Your session will expire in approximately ${minutesUntilExpiry} minute${minutesUntilExpiry !== 1 ? 's' : ''}.</strong>
+              </div>
+
+              <p>If you would like to continue your session, please:</p>
+              <ul>
+                <li>Return to the InsureMatch application and click "Extend Session" when prompted</li>
+                <li>Or simply perform any action in the application to refresh your session</li>
+              </ul>
+
+              <p><strong>What happens if my session expires?</strong></p>
+              <ul>
+                <li>You will be automatically logged out</li>
+                <li>Any unsaved data will be lost</li>
+                <li>You will need to log in again to continue</li>
+              </ul>
+
+              <p>If you have already finished using InsureMatch, you can safely ignore this email.</p>
+
+              <p>Best regards,<br>The InsureMatch Team</p>
+            </div>
+            <div class="footer">
+              <p>This is an automated security message from InsureMatch.</p>
+              <p>If you did not initiate this session, please secure your account immediately.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `
+        Hi ${name},
+
+        This is a friendly reminder that your InsureMatch session is about to expire.
+
+        ⚠️ Your session will expire in approximately ${minutesUntilExpiry} minute${minutesUntilExpiry !== 1 ? 's' : ''}.
+
+        If you would like to continue your session, please:
+        - Return to the InsureMatch application and click "Extend Session" when prompted
+        - Or simply perform any action in the application to refresh your session
+
+        What happens if my session expires?
+        - You will be automatically logged out
+        - Any unsaved data will be lost
+        - You will need to log in again to continue
+
+        If you have already finished using InsureMatch, you can safely ignore this email.
+
+        Best regards,
+        The InsureMatch Team
+
+        ---
+        This is an automated security message from InsureMatch.
+        If you did not initiate this session, please secure your account immediately.
+      `
+    };
+
+    // If no transporter is configured, log to console (for development)
+    if (!transporter) {
+      console.log('\n=== SESSION EXPIRY WARNING EMAIL SIMULATION ===');
+      console.log(`To: ${email}`);
+      console.log(`Subject: ${mailOptions.subject}`);
+      console.log(`Session expires in: ${minutesUntilExpiry} minute(s)`);
+      console.log('===============================================\n');
+
+      return {
+        success: true,
+        message: 'Session expiry warning logged to console (no SMTP configured)',
+        messageId: 'simulated-' + Date.now()
+      };
+    }
+
+    // Send actual email
+    const info = await transporter.sendMail(mailOptions);
+
+    return {
+      success: true,
+      message: 'Session expiry warning email sent successfully',
+      messageId: info.messageId
+    };
+  } catch (error) {
+    console.error('Error sending session expiry warning email:', error);
+    // Don't throw error - this is a non-critical notification
+    return {
+      success: false,
+      message: 'Failed to send session expiry warning email'
+    };
+  }
+};
+
 module.exports = {
   sendVerificationEmail,
   sendWelcomeEmail,
-  sendInvitationEmail
+  sendInvitationEmail,
+  sendSessionExpiryWarningEmail
 };

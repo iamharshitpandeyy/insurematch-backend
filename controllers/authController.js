@@ -762,6 +762,84 @@ const logout = async (req, res) => {
   }
 };
 
+/**
+ * Extend session using refresh token
+ * POST /api/auth/extend-session
+ * This is essentially an alias for refresh-token but with clearer intent
+ */
+const extendSession = async (req, res) => {
+  try {
+    // Validate request
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        errors: errors.array()
+      });
+    }
+
+    const { refreshToken: token } = req.body;
+
+    // Find user by refresh token
+    try {
+      const user = await User.findOne({
+        refreshToken: token,
+        refreshTokenExpires: { $gt: new Date() }
+      });
+
+      if (!user) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid or expired refresh token. Please login again.'
+        });
+      }
+
+      // Verify the refresh token
+      if (!user.verifyRefreshToken(token)) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid or expired refresh token. Please login again.'
+        });
+      }
+
+      // Generate new access token
+      const newAccessToken = generateAccessToken(user._id);
+
+      // Rotate refresh token (generate new refresh token)
+      const newRefreshToken = user.generateRefreshToken();
+      await user.save();
+
+      res.status(200).json({
+        success: true,
+        message: 'Session extended successfully',
+        data: {
+          accessToken: newAccessToken,
+          refreshToken: newRefreshToken,
+          user: {
+            id: user._id,
+            email: user.email,
+            name: user.name,
+            role: user.role
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Session extension error:', error);
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired refresh token. Please login again.'
+      });
+    }
+  } catch (error) {
+    console.error('Session extension error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'An error occurred while extending session. Please try again.'
+    });
+  }
+};
+
 module.exports = {
   register,
   verifyEmail,
@@ -772,5 +850,6 @@ module.exports = {
   acceptInvitation,
   login,
   refreshToken,
-  logout
+  logout,
+  extendSession
 };
