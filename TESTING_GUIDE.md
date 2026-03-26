@@ -1248,3 +1248,580 @@ After successful testing:
 5. Implement "remember me" functionality
 6. Add password reset flow
 7. Consider adding multi-factor authentication (MFA)
+
+---
+
+# Testing Guide: Session Expiry with Warning and Logout
+
+This guide provides comprehensive testing instructions for the session expiry warning and automatic logout functionality.
+
+## Overview
+
+The session expiry feature includes:
+- **Warning Detection**: Middleware checks if access token expires within 5 minutes
+- **Client Notification**: Response headers indicate session is expiring
+- **Email Warning**: User receives email notification about impending expiry
+- **Session Extension**: User can extend session using refresh token
+- **Automatic Logout**: User is logged out when access token expires
+
+## Prerequisites
+
+1. **Server Running:**
+   ```bash
+   npm run dev
+   ```
+
+2. **Environment Variables:**
+   Ensure your `.env` file includes:
+   ```env
+   JWT_ACCESS_EXPIRES_IN=15m
+   JWT_REFRESH_EXPIRES_IN=7d
+   ```
+
+3. **Test User:**
+   You'll need a registered and verified user account.
+
+## Part 1: Understanding Session Expiry Timing
+
+### Default Configuration
+- **Access Token Expiration**: 15 minutes (configurable via `JWT_ACCESS_EXPIRES_IN`)
+- **Warning Threshold**: 5 minutes before expiration
+- **Warning Window**: From minute 10 to minute 15 after login
+
+### Adjusting for Testing
+
+For faster testing, you can temporarily change the expiration time:
+
+```env
+# In .env file - set access token to expire in 6 minutes
+JWT_ACCESS_EXPIRES_IN=6m
+```
+
+With this setting:
+- **Access Token Expiration**: 6 minutes
+- **Warning Threshold**: 5 minutes before expiration
+- **Warning Window**: From minute 1 to minute 6 after login
+
+Or even faster for rapid testing:
+
+```env
+# Access token expires in 5.5 minutes (330 seconds)
+JWT_ACCESS_EXPIRES_IN=330s
+```
+
+With this setting, warnings appear within 30 seconds of login.
+
+## Part 2: Session Expiry Warning Testing
+
+### Test 1: Login and Access Protected Route
+
+**Step 1: Login**
+```bash
+curl -X POST http://localhost:5000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "testuser@example.com",
+    "password": "SecurePass123"
+  }'
+```
+
+**Save the tokens:**
+```bash
+export ACCESS_TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+export REFRESH_TOKEN="a1b2c3d4e5f6g7h8i9j0..."
+```
+
+**Step 2: Access Protected Route (Before Warning Window)**
+
+Within the first 10 minutes (or 1 minute with `JWT_ACCESS_EXPIRES_IN=6m`):
+
+```bash
+curl -i -X POST http://localhost:5000/api/auth/logout \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json"
+```
+
+**Expected Response:**
+- Status: 200 OK
+- **No warning headers** (session not expiring yet)
+
+### Test 2: Session Expiry Warning Detection
+
+**Wait until warning window** (10-15 minutes with default, or 1-6 minutes with `JWT_ACCESS_EXPIRES_IN=6m`)
+
+**Access any protected route:**
+```bash
+curl -i -X POST http://localhost:5000/api/auth/admin/create-platform-admin \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "newadmin@example.com",
+    "password": "AdminPass123",
+    "name": "New Admin"
+  }'
+```
+
+**Expected Response Headers:**
+```
+X-Session-Expiry-Warning: true
+X-Session-Expires-In: 298
+```
+
+**Where:**
+- `X-Session-Expiry-Warning: true` - Indicates session is expiring soon
+- `X-Session-Expires-In: 298` - Seconds until expiration (approximately)
+
+**Expected Console Output:**
+```
+=== SESSION EXPIRY WARNING EMAIL SIMULATION ===
+To: testuser@example.com
+Subject: Session Expiry Warning - InsureMatch
+Session expires in: 5 minute(s)
+===============================================
+```
+
+### Test 3: Multiple Warning Triggers
+
+The middleware will send email warnings, but to prevent spam, consider that:
+- Email is sent on **first request** in warning window
+- Subsequent requests still set headers but may want to throttle emails
+
+**Make multiple requests in warning window:**
+```bash
+# Request 1
+curl -i -X POST http://localhost:5000/api/auth/logout \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+
+# Wait 30 seconds
+
+# Request 2
+curl -i -X POST http://localhost:5000/api/auth/logout \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+**Expected:**
+- Both requests should include warning headers
+- Email sent on each request (consider implementing throttling in production)
+
+## Part 3: Session Extension Testing
+
+### Test 4: Extend Session Before Expiry
+
+**When you receive session expiry warning:**
+
+```bash
+curl -X POST http://localhost:5000/api/auth/extend-session \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"refreshToken\": \"$REFRESH_TOKEN\"
+  }"
+```
+
+**Expected Response (200):**
+```json
+{
+  "success": true,
+  "message": "Session extended successfully",
+  "data": {
+    "accessToken": "NEW_ACCESS_TOKEN...",
+    "refreshToken": "NEW_REFRESH_TOKEN...",
+    "user": {
+      "id": "65f1a2b3c4d5e6f7g8h9i0j1",
+      "email": "testuser@example.com",
+      "name": "Test User",
+      "role": "enduser"
+    }
+  }
+}
+```
+
+**Save new tokens:**
+```bash
+export ACCESS_TOKEN="NEW_ACCESS_TOKEN..."
+export REFRESH_TOKEN="NEW_REFRESH_TOKEN..."
+```
+
+**Verify session extended:**
+```bash
+curl -i -X POST http://localhost:5000/api/auth/logout \
+  -H "Authorization: Bearer $ACCESS_TOKEN"
+```
+
+**Expected:**
+- No warning headers (new token is fresh)
+- Session successfully extended
+
+### Test 5: Extend Session vs Refresh Token
+
+**Note:** Both endpoints do the same thing (refresh the token):
+
+```bash
+# Method 1: extend-session (explicit intent)
+curl -X POST http://localhost:5000/api/auth/extend-session \
+  -H "Content-Type: application/json" \
+  -d "{\"refreshToken\": \"$REFRESH_TOKEN\"}"
+
+# Method 2: refresh-token (general purpose)
+curl -X POST http://localhost:5000/api/auth/refresh-token \
+  -H "Content-Type: application/json" \
+  -d "{\"refreshToken\": \"$REFRESH_TOKEN\"}"
+```
+
+Both endpoints:
+- Generate new access token
+- Rotate refresh token
+- Extend session
+
+## Part 4: Automatic Logout Testing
+
+### Test 6: Wait for Token Expiration
+
+**Option A: Wait for natural expiration**
+- Wait for full expiration time (15 minutes by default)
+
+**Option B: Use short expiration for testing**
+```env
+# .env
+JWT_ACCESS_EXPIRES_IN=2m
+```
+
+**After token expires, try to access protected route:**
+```bash
+curl -X POST http://localhost:5000/api/auth/logout \
+  -H "Authorization: Bearer $EXPIRED_ACCESS_TOKEN" \
+  -H "Content-Type: application/json"
+```
+
+**Expected Response (401):**
+```json
+{
+  "success": false,
+  "message": "Token expired."
+}
+```
+
+**This simulates automatic logout** - the client should:
+1. Detect the 401 error with "Token expired" message
+2. Clear local storage
+3. Redirect to login page
+4. Optionally notify user about session expiration
+
+## Part 5: Email Notification Testing
+
+### Test 7: Verify Email Content
+
+**With SMTP Configured:**
+1. Configure SMTP settings in `.env`
+2. Trigger session warning
+3. Check email inbox for warning
+
+**Without SMTP (Development):**
+1. Leave `EMAIL_HOST` empty in `.env`
+2. Trigger session warning
+3. Check console output:
+
+```
+=== SESSION EXPIRY WARNING EMAIL SIMULATION ===
+To: testuser@example.com
+Subject: Session Expiry Warning - InsureMatch
+Session expires in: 5 minute(s)
+===============================================
+```
+
+**Email Content Should Include:**
+- Warning about session expiring
+- Time until expiration
+- Instructions to extend session
+- Information about what happens if session expires
+
+## Part 6: Integration Testing Scenarios
+
+### Scenario 1: User Extends Session in Time
+
+1. **Login** → Get tokens
+2. **Work normally** → No warnings
+3. **Receive warning** (10 minutes) → Headers indicate expiry
+4. **Extend session** → New tokens issued
+5. **Continue working** → Session extended successfully
+
+### Scenario 2: User Ignores Warning
+
+1. **Login** → Get tokens
+2. **Work normally** → No warnings
+3. **Receive warning** (10 minutes) → User ignores
+4. **Token expires** (15 minutes) → Automatic logout
+5. **Try to access** → 401 Unauthorized
+6. **Must re-login** → Enter credentials again
+
+### Scenario 3: Multiple Devices
+
+1. **Login on Device A** → Token A
+2. **Login on Device B** → Token B (different refresh token)
+3. **Warning on Device A** → Extend session on A only
+4. **Device B** → Still has original expiration
+5. **Both devices** → Independent session management
+
+## Part 7: Complete Test Script
+
+**Automated Testing Script (Bash):**
+
+```bash
+#!/bin/bash
+
+BASE_URL="http://localhost:5000"
+EMAIL="sessiontest@example.com"
+PASSWORD="SecurePass123"
+
+echo "=== SESSION EXPIRY TESTING ==="
+echo ""
+
+# Step 1: Login
+echo "1. Logging in..."
+LOGIN_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"email\": \"$EMAIL\",
+    \"password\": \"$PASSWORD\"
+  }")
+
+ACCESS_TOKEN=$(echo $LOGIN_RESPONSE | jq -r '.data.accessToken')
+REFRESH_TOKEN=$(echo $LOGIN_RESPONSE | jq -r '.data.refreshToken')
+
+echo "Access Token: ${ACCESS_TOKEN:0:50}..."
+echo "Refresh Token: ${REFRESH_TOKEN:0:50}..."
+echo ""
+
+# Step 2: Access protected route (no warning yet)
+echo "2. Accessing protected route (early in session)..."
+RESPONSE=$(curl -i -s -X POST "$BASE_URL/api/auth/logout" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" 2>&1)
+
+if echo "$RESPONSE" | grep -q "X-Session-Expiry-Warning"; then
+  echo "⚠️  Warning detected (unexpected at this stage)"
+else
+  echo "✅ No warning (expected - session is fresh)"
+fi
+echo ""
+
+# Step 3: Wait for warning window
+echo "3. Waiting for warning window..."
+echo "   (Configure JWT_ACCESS_EXPIRES_IN=330s in .env for faster testing)"
+echo "   Press Ctrl+C to skip waiting, or wait for warning window..."
+read -t 600 -p "   Waiting... (or press Enter when ready)" || true
+echo ""
+
+# Step 4: Login again for fresh test
+echo "4. Logging in again for warning test..."
+LOGIN_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"email\": \"$EMAIL\",
+    \"password\": \"$PASSWORD\"
+  }")
+
+ACCESS_TOKEN=$(echo $LOGIN_RESPONSE | jq -r '.data.accessToken')
+REFRESH_TOKEN=$(echo $LOGIN_RESPONSE | jq -r '.data.refreshToken')
+echo ""
+
+# Step 5: Decode token to check expiry
+echo "5. Checking token expiration time..."
+# Note: This requires 'jq' and base64 decoding
+PAYLOAD=$(echo $ACCESS_TOKEN | cut -d '.' -f 2)
+# Add padding if needed
+PADDING=$((4 - ${#PAYLOAD} % 4))
+if [ $PADDING -ne 4 ]; then
+  PAYLOAD="${PAYLOAD}$(printf '=%.0s' $(seq 1 $PADDING))"
+fi
+DECODED=$(echo $PAYLOAD | base64 -d 2>/dev/null | jq '.')
+echo "$DECODED"
+echo ""
+
+# Step 6: Test session extension
+echo "6. Testing session extension..."
+EXTEND_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/extend-session" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"refreshToken\": \"$REFRESH_TOKEN\"
+  }")
+
+NEW_ACCESS_TOKEN=$(echo $EXTEND_RESPONSE | jq -r '.data.accessToken')
+
+if [ "$NEW_ACCESS_TOKEN" != "null" ] && [ -n "$NEW_ACCESS_TOKEN" ]; then
+  echo "✅ Session extended successfully"
+  echo "New Access Token: ${NEW_ACCESS_TOKEN:0:50}..."
+else
+  echo "❌ Session extension failed"
+  echo "$EXTEND_RESPONSE"
+fi
+echo ""
+
+echo "=== TEST COMPLETE ==="
+```
+
+**Save as `test_session_expiry.sh` and run:**
+```bash
+chmod +x test_session_expiry.sh
+./test_session_expiry.sh
+```
+
+## Part 8: Test Case Matrix
+
+| # | Test Case | Expected Status | Expected Headers | Expected Result |
+|---|-----------|-----------------|------------------|-----------------|
+| 1 | Access route with fresh token (< 10 min) | 200 | No warning headers | Request succeeds |
+| 2 | Access route in warning window (10-15 min) | 200 | X-Session-Expiry-Warning: true | Request succeeds + warning |
+| 3 | Access route with expired token (> 15 min) | 401 | None | "Token expired" error |
+| 4 | Extend session with valid refresh token | 200 | None | New tokens issued |
+| 5 | Extend session with invalid refresh token | 401 | None | "Invalid refresh token" |
+| 6 | Multiple requests in warning window | 200 | Warning headers on all | Email sent (may throttle) |
+| 7 | Extend session, then access route | 200 | No warning headers | Fresh session, no warning |
+
+## Part 9: Frontend Integration Checklist
+
+When integrating with frontend:
+
+### Response Header Monitoring
+```javascript
+// Check for session expiry warning in response headers
+const checkSessionExpiry = (response) => {
+  const expiryWarning = response.headers.get('X-Session-Expiry-Warning');
+  const expiresIn = response.headers.get('X-Session-Expires-In');
+
+  if (expiryWarning === 'true') {
+    const minutes = Math.ceil(parseInt(expiresIn) / 60);
+    showSessionWarningModal(minutes);
+  }
+};
+```
+
+### Session Warning Modal
+```javascript
+// Display modal to user
+const showSessionWarningModal = (minutesLeft) => {
+  // Show modal: "Your session will expire in {minutesLeft} minutes"
+  // Options:
+  // 1. "Extend Session" → Call /api/auth/extend-session
+  // 2. "Logout Now" → Call /api/auth/logout
+  // 3. "Continue Working" → Dismiss (will auto-logout on expiry)
+};
+```
+
+### Automatic Token Refresh
+```javascript
+// On user choosing to extend session
+const extendSession = async () => {
+  const refreshToken = localStorage.getItem('refreshToken');
+
+  const response = await fetch('/api/auth/extend-session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ refreshToken })
+  });
+
+  const data = await response.json();
+
+  if (data.success) {
+    localStorage.setItem('accessToken', data.data.accessToken);
+    localStorage.setItem('refreshToken', data.data.refreshToken);
+    hideSessionWarningModal();
+  }
+};
+```
+
+### Automatic Logout on Expiry
+```javascript
+// Handle 401 errors from token expiration
+const handleApiError = (error) => {
+  if (error.message === 'Token expired.') {
+    // Clear tokens
+    localStorage.removeItem('accessToken');
+    localStorage.removeItem('refreshToken');
+
+    // Show notification
+    showNotification('Your session has expired. Please login again.');
+
+    // Redirect to login
+    window.location.href = '/login';
+  }
+};
+```
+
+## Part 10: Security Considerations
+
+### Warning Throttling
+Consider implementing throttling to prevent email spam:
+
+```javascript
+// In middleware/auth.js, track last warning time
+const lastWarningTime = new Map();
+
+// Only send email if last warning was > 2 minutes ago
+const userId = decoded.userId;
+const now = Date.now();
+const lastWarning = lastWarningTime.get(userId);
+
+if (!lastWarning || now - lastWarning > 2 * 60 * 1000) {
+  sendSessionExpiryWarningEmail(user.email, user.name, timeUntilExpiry);
+  lastWarningTime.set(userId, now);
+}
+```
+
+### Unsaved Data Handling
+- Frontend should warn users about unsaved data
+- Consider implementing auto-save functionality
+- Provide clear warning before automatic logout
+
+## Troubleshooting
+
+### Issue: No warning headers even in warning window
+**Solution:**
+- Check `JWT_ACCESS_EXPIRES_IN` is set correctly
+- Verify token is not already expired
+- Ensure `checkSessionExpiry` middleware is applied to route
+- Check server logs for middleware errors
+
+### Issue: Warning appears immediately after login
+**Solution:**
+- Token expiration time may be too short
+- Check `JWT_ACCESS_EXPIRES_IN` value
+- Verify server time is correct
+
+### Issue: Email not sent
+**Solution:**
+- Check EMAIL_HOST configuration
+- Look for email in console logs (development mode)
+- Check server logs for email errors
+- Verify user email exists in database
+
+### Issue: Session extension fails
+**Solution:**
+- Ensure refresh token is valid and not expired
+- Check refresh token hasn't been used before (rotation)
+- Verify user exists in database
+- Check server logs for specific error
+
+## Success Criteria Checklist
+
+- [ ] User receives warning when session expires within 5 minutes
+- [ ] Warning headers (`X-Session-Expiry-Warning`, `X-Session-Expires-In`) are present in response
+- [ ] Email notification sent to user about session expiry
+- [ ] User can extend session using refresh token via `/api/auth/extend-session`
+- [ ] Session extension provides new access token and refresh token
+- [ ] Old refresh token is invalidated after extension (rotation)
+- [ ] Expired access tokens result in 401 error
+- [ ] Automatic logout occurs when token expires
+- [ ] Multiple requests in warning window all include warning headers
+- [ ] Session extension resets the warning timer
+- [ ] Email content is clear and actionable
+
+## Next Steps
+
+After successful testing:
+1. Implement frontend warning modal/notification
+2. Add session extension UI in frontend
+3. Implement auto-save for unsaved data
+4. Add session expiry countdown timer in UI
+5. Consider adding "remember me" to extend refresh token life
+6. Implement session activity tracking
+7. Add analytics for session expiry patterns
+8. Consider implementing session throttling for email warnings

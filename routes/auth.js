@@ -10,9 +10,10 @@ const {
   acceptInvitation,
   login,
   refreshToken,
-  logout
+  logout,
+  extendSession
 } = require('../controllers/authController');
-const { authenticate, authorize } = require('../middleware/auth');
+const { authenticate, authorize, checkSessionExpiry } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -102,12 +103,28 @@ router.post(
 );
 
 /**
+ * @route   POST /api/auth/extend-session
+ * @desc    Extend session using refresh token (alias for refresh-token with clearer intent)
+ * @access  Public
+ */
+router.post(
+  '/extend-session',
+  [
+    body('refreshToken')
+      .notEmpty()
+      .withMessage('Refresh token is required')
+  ],
+  extendSession
+);
+
+/**
  * @route   POST /api/auth/logout
  * @desc    Logout user and invalidate refresh token
  * @access  Private
  */
 router.post(
   '/logout',
+  checkSessionExpiry,
   authenticate,
   logout
 );
@@ -157,6 +174,7 @@ router.post(
  */
 router.post(
   '/admin/create-platform-admin',
+  checkSessionExpiry,
   authenticate,
   authorize('platform_admin'),
   [
@@ -186,6 +204,7 @@ router.post(
  */
 router.post(
   '/admin/invite-insurer-admin',
+  checkSessionExpiry,
   authenticate,
   authorize('platform_admin'),
   [
@@ -214,6 +233,7 @@ router.post(
  */
 router.post(
   '/admin/invite-insurer-agent',
+  checkSessionExpiry,
   authenticate,
   authorize('platform_admin'),
   [
