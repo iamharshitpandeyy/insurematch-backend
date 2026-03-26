@@ -4,14 +4,27 @@ Backend API for the InsureMatch application - a platform for matching users with
 
 ## Features
 
+### End User Features
 - User registration with email and password
 - Email verification with 6-digit codes
 - JWT-based authentication
 - Password hashing with bcrypt
+- Age verification (18+)
+
+### Admin Features (NEW ✨)
+- Platform Admin account creation
+- Insurer Admin invitation system
+- Insurer Agent invitation system
+- Token-based invitation links (48-hour expiration)
+- Role-based access control (RBAC)
+- Secure invitation email delivery
+
+### Technical Features
 - Email service with nodemailer
 - MongoDB database with mongoose
 - Input validation and sanitization
-- Age verification (18+)
+- JWT-based authentication & authorization
+- Middleware for authentication and role-based access
 
 ## Tech Stack
 
@@ -83,12 +96,39 @@ npm start
 
 The server will start on `http://localhost:5000`
 
+6. (Optional) Create first Platform Admin
+```bash
+# Using the seed script
+npm run seed:admin
+```
+
+This creates a Platform Admin with credentials from your `.env` file (or defaults to `admin@insurematch.com` / `AdminPass123`).
+
 ## API Documentation
+
+### 📚 Comprehensive Documentation
+
+For detailed API documentation, testing guides, and implementation details, see:
+
+- **[ADMIN_API_DOCUMENTATION.md](./ADMIN_API_DOCUMENTATION.md)** - Complete API docs for admin features
+- **[TESTING_GUIDE.md](./TESTING_GUIDE.md)** - Step-by-step testing instructions
+- **[IMPLEMENTATION_SUMMARY.md](./IMPLEMENTATION_SUMMARY.md)** - Technical implementation details
+- **[postman_collection.json](./postman_collection.json)** - Postman collection for easy API testing
 
 ### Base URL
 ```
 http://localhost:5000/api
 ```
+
+### User Roles
+
+The system supports the following user roles:
+- `enduser` - Regular users (default)
+- `broker` - Insurance brokers
+- `admin` - General admin (legacy)
+- `platform_admin` - Platform administrators with full access
+- `insurer_admin` - Administrators for insurance companies
+- `insurer_agent` - Agents for insurance companies
 
 ### Authentication Endpoints
 
@@ -210,6 +250,24 @@ http://localhost:5000/api
 }
 ```
 
+### Admin Endpoints (NEW ✨)
+
+For complete documentation of admin endpoints, see [ADMIN_API_DOCUMENTATION.md](./ADMIN_API_DOCUMENTATION.md).
+
+#### Overview
+
+- **POST /api/auth/admin/create-platform-admin** - Create new Platform Admin (requires Platform Admin authentication)
+- **POST /api/auth/admin/invite-insurer-admin** - Invite Insurer Admin (requires Platform Admin authentication)
+- **POST /api/auth/admin/invite-insurer-agent** - Invite Insurer Agent (requires Platform Admin authentication)
+- **POST /api/auth/accept-invitation** - Accept invitation and set password (public endpoint)
+
+All admin endpoints require authentication via JWT token in the `Authorization` header:
+```
+Authorization: Bearer <token>
+```
+
+Only Platform Admins can access admin endpoints. Invitation links expire after 48 hours.
+
 ### Health Check
 
 **Endpoint:** `GET /health`
@@ -278,7 +336,10 @@ Configure SMTP settings in `.env`:
   isEmailVerified: Boolean, // Email verification status
   emailVerificationCode: String,  // 6-digit code
   emailVerificationExpires: Date, // Code expiration time
-  role: String,           // 'enduser', 'broker', or 'admin'
+  role: String,           // 'enduser', 'broker', 'admin', 'platform_admin', 'insurer_admin', 'insurer_agent'
+  invitationToken: String, // Token for admin/agent invitations (NEW)
+  invitationExpiresAt: Date, // Invitation expiration time (NEW)
+  insurerId: ObjectId,    // Reference to Insurer (NEW)
   createdAt: Date,        // Auto-generated
   updatedAt: Date         // Auto-generated
 }
@@ -307,29 +368,40 @@ npm test
 ```
 insurematch-backend/
 ├── controllers/
-│   └── authController.js    # Authentication logic
+│   └── authController.js          # Authentication logic (including admin operations)
 ├── models/
-│   └── User.js              # User model
+│   └── User.js                    # User model (with admin roles)
 ├── routes/
-│   └── auth.js              # Authentication routes
+│   └── auth.js                    # Authentication routes (including admin routes)
+├── middleware/                     # NEW
+│   └── auth.js                    # Authentication & authorization middleware
 ├── utils/
-│   └── emailService.js      # Email sending functionality
-├── config/
-├── .env.example             # Example environment variables
-├── .gitignore              # Git ignore file
-├── package.json            # Dependencies and scripts
-├── server.js               # Application entry point
-└── README.md               # This file
+│   └── emailService.js            # Email sending functionality (including invitations)
+├── scripts/                        # NEW
+│   └── seedPlatformAdmin.js       # Seed script for first Platform Admin
+├── .env.example                   # Example environment variables
+├── .gitignore                     # Git ignore file
+├── package.json                   # Dependencies and scripts
+├── server.js                      # Application entry point
+├── README.md                      # This file
+├── ADMIN_API_DOCUMENTATION.md     # NEW - Complete admin API documentation
+├── IMPLEMENTATION_SUMMARY.md      # NEW - Technical implementation details
+├── TESTING_GUIDE.md               # NEW - Step-by-step testing guide
+└── postman_collection.json        # NEW - Postman collection for API testing
 ```
 
 ## Security Features
 
 - Password hashing with bcrypt (10 salt rounds)
-- JWT token-based authentication
+- JWT token-based authentication & authorization
+- Role-based access control (RBAC) for admin operations
 - Email verification required before account activation
+- Secure invitation tokens using crypto.randomBytes (256-bit)
+- Time-limited invitation links (48-hour expiration)
 - Input validation and sanitization
 - Age verification (18+ only)
 - Password complexity requirements
+- Protected admin endpoints with middleware
 - CORS enabled for cross-origin requests
 - Environment-based configuration
 

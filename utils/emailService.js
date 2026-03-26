@@ -250,7 +250,157 @@ const sendWelcomeEmail = async (email, name) => {
   }
 };
 
+/**
+ * Send invitation email for admin/agent roles
+ * @param {string} email - Recipient email address
+ * @param {string} name - Recipient name
+ * @param {string} invitationLink - Invitation link with token
+ * @param {string} roleType - Type of role (e.g., 'Insurer Admin', 'Insurer Agent')
+ * @returns {Promise<Object>} - Result of email send operation
+ */
+const sendInvitationEmail = async (email, name, invitationLink, roleType) => {
+  try {
+    const transporter = createTransporter();
+
+    const mailOptions = {
+      from: `"InsureMatch" <${process.env.EMAIL_FROM || 'noreply@insurematch.com'}>`,
+      to: email,
+      subject: `You're Invited to Join InsureMatch as ${roleType}`,
+      html: `
+        <!DOCTYPE html>
+        <html>
+        <head>
+          <style>
+            body {
+              font-family: Arial, sans-serif;
+              line-height: 1.6;
+              color: #333;
+            }
+            .container {
+              max-width: 600px;
+              margin: 0 auto;
+              padding: 20px;
+            }
+            .header {
+              background-color: #4CAF50;
+              color: white;
+              padding: 20px;
+              text-align: center;
+            }
+            .content {
+              background-color: #f9f9f9;
+              padding: 30px;
+              border-radius: 5px;
+              margin-top: 20px;
+            }
+            .button {
+              display: inline-block;
+              padding: 15px 30px;
+              background-color: #4CAF50;
+              color: white;
+              text-decoration: none;
+              border-radius: 5px;
+              margin: 20px 0;
+              font-weight: bold;
+            }
+            .footer {
+              text-align: center;
+              margin-top: 30px;
+              font-size: 12px;
+              color: #666;
+            }
+            .warning {
+              background-color: #fff3cd;
+              border-left: 4px solid #ffc107;
+              padding: 10px;
+              margin: 20px 0;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>Welcome to InsureMatch!</h1>
+            </div>
+            <div class="content">
+              <p>Hi ${name},</p>
+              <p>You have been invited to join InsureMatch as a <strong>${roleType}</strong>.</p>
+              <p>To accept this invitation and set up your account, please click the button below:</p>
+
+              <div style="text-align: center;">
+                <a href="${invitationLink}" class="button">Accept Invitation</a>
+              </div>
+
+              <p>Or copy and paste this link into your browser:</p>
+              <p style="word-break: break-all; background-color: #fff; padding: 10px; border-radius: 5px;">
+                ${invitationLink}
+              </p>
+
+              <div class="warning">
+                <strong>Important:</strong> This invitation link will expire in 48 hours. Please complete your registration before then.
+              </div>
+
+              <p>If you did not expect this invitation or have any questions, please contact our support team.</p>
+
+              <p>Best regards,<br>The InsureMatch Team</p>
+            </div>
+            <div class="footer">
+              <p>This is an automated message, please do not reply to this email.</p>
+            </div>
+          </div>
+        </body>
+        </html>
+      `,
+      text: `
+        Hi ${name},
+
+        You have been invited to join InsureMatch as a ${roleType}.
+
+        To accept this invitation and set up your account, please visit the following link:
+
+        ${invitationLink}
+
+        Important: This invitation link will expire in 48 hours. Please complete your registration before then.
+
+        If you did not expect this invitation or have any questions, please contact our support team.
+
+        Best regards,
+        The InsureMatch Team
+      `
+    };
+
+    // If no transporter is configured, log to console (for development)
+    if (!transporter) {
+      console.log('\n=== EMAIL SIMULATION ===');
+      console.log(`To: ${email}`);
+      console.log(`Subject: ${mailOptions.subject}`);
+      console.log(`Role: ${roleType}`);
+      console.log(`Invitation Link: ${invitationLink}`);
+      console.log('========================\n');
+
+      return {
+        success: true,
+        message: 'Invitation email logged to console (no SMTP configured)',
+        messageId: 'simulated-' + Date.now()
+      };
+    }
+
+    // Send actual email
+    const info = await transporter.sendMail(mailOptions);
+
+    return {
+      success: true,
+      message: 'Invitation email sent successfully',
+      messageId: info.messageId
+    };
+  } catch (error) {
+    console.error('Error sending invitation email:', error);
+    throw new Error('Failed to send invitation email: ' + error.message);
+  }
+};
+
 module.exports = {
   sendVerificationEmail,
-  sendWelcomeEmail
+  sendWelcomeEmail,
+  sendInvitationEmail
 };

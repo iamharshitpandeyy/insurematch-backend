@@ -58,8 +58,21 @@ const userSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['enduser', 'broker', 'admin'],
+    enum: ['enduser', 'broker', 'admin', 'platform_admin', 'insurer_admin', 'insurer_agent'],
     default: 'enduser'
+  },
+  invitationToken: {
+    type: String,
+    default: null
+  },
+  invitationExpiresAt: {
+    type: Date,
+    default: null
+  },
+  insurerId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Insurer',
+    default: null
   }
 }, {
   timestamps: true
@@ -104,6 +117,28 @@ userSchema.methods.verifyCode = function(code) {
   }
 
   return this.emailVerificationCode === code;
+};
+
+// Method to generate invitation token
+userSchema.methods.generateInvitationToken = function() {
+  const crypto = require('crypto');
+  const token = crypto.randomBytes(32).toString('hex');
+  this.invitationToken = token;
+  this.invitationExpiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000); // 48 hours
+  return token;
+};
+
+// Method to verify invitation token
+userSchema.methods.verifyInvitationToken = function(token) {
+  if (!this.invitationToken || !this.invitationExpiresAt) {
+    return false;
+  }
+
+  if (this.invitationExpiresAt < new Date()) {
+    return false;
+  }
+
+  return this.invitationToken === token;
 };
 
 const User = mongoose.model('User', userSchema);
