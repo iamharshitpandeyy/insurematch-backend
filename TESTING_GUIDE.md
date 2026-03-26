@@ -530,3 +530,721 @@ For issues or questions:
 - Review IMPLEMENTATION_SUMMARY.md for architecture overview
 - Check server console logs for detailed error messages
 - Verify .env configuration matches .env.example
+
+---
+
+# Testing Guide: JWT Authentication with Refresh Token Rotation
+
+This guide provides comprehensive testing instructions for the JWT-based authentication system with refresh token rotation.
+
+## Prerequisites
+
+1. **MongoDB Running:**
+   ```bash
+   # Start MongoDB (if not already running)
+   mongod
+   ```
+
+2. **Environment Variables:**
+   Ensure your `.env` file includes:
+   ```env
+   JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+   JWT_ACCESS_EXPIRES_IN=15m
+   JWT_REFRESH_EXPIRES_IN=7d
+   ```
+
+3. **Server Running:**
+   ```bash
+   npm run dev
+   ```
+
+4. **Test User:**
+   You'll need a registered and verified user account for testing. You can use the existing registration and verification endpoints.
+
+## Testing Tools
+
+You can use any of the following tools to test the API:
+- **cURL** (command line)
+- **Postman** (GUI)
+- **HTTPie** (command line)
+- **Insomnia** (GUI)
+
+## Part 1: User Registration and Verification
+
+### Step 1: Register a Test User
+
+**Request:**
+```bash
+curl -X POST http://localhost:5000/api/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "testuser@example.com",
+    "password": "SecurePass123",
+    "name": "Test User",
+    "dateOfBirth": "1995-05-15"
+  }'
+```
+
+**Expected Response (201):**
+```json
+{
+  "success": true,
+  "message": "Registration successful! Please check your email for a verification code.",
+  "data": {
+    "userId": "65f1a2b3c4d5e6f7g8h9i0j1",
+    "email": "testuser@example.com",
+    "name": "Test User",
+    "isEmailVerified": false
+  }
+}
+```
+
+**Note:** Check the console for the 6-digit verification code if email is not configured.
+
+### Step 2: Verify Email
+
+**Request:**
+```bash
+curl -X POST http://localhost:5000/api/auth/verify-email \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "testuser@example.com",
+    "verificationCode": "123456"
+  }'
+```
+
+**Expected Response (200):**
+```json
+{
+  "success": true,
+  "message": "Email verified successfully!",
+  "data": {
+    "token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "user": {
+      "id": "65f1a2b3c4d5e6f7g8h9i0j1",
+      "email": "testuser@example.com",
+      "name": "Test User",
+      "dateOfBirth": "1995-05-15T00:00:00.000Z",
+      "isEmailVerified": true,
+      "role": "enduser"
+    }
+  }
+}
+```
+
+## Part 2: Login and Token Generation
+
+### Test 1: Successful Login
+
+**Request:**
+```bash
+curl -X POST http://localhost:5000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "testuser@example.com",
+    "password": "SecurePass123"
+  }'
+```
+
+**Expected Response (200):**
+```json
+{
+  "success": true,
+  "message": "Login successful",
+  "data": {
+    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiI2NWYxYTJiM2M0ZDVlNmY3ZzhoOWkwajEiLCJpYXQiOjE3MTA0MjAwMDAsImV4cCI6MTcxMDQyMDkwMH0...",
+    "refreshToken": "a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0u1v2w3x4y5z6a7b8c9d0e1f2g3h4i5j6k7l8m9n0o1p2q3r4s5t6u7v8w9x0",
+    "user": {
+      "id": "65f1a2b3c4d5e6f7g8h9i0j1",
+      "email": "testuser@example.com",
+      "name": "Test User",
+      "dateOfBirth": "1995-05-15T00:00:00.000Z",
+      "role": "enduser",
+      "isEmailVerified": true
+    }
+  }
+}
+```
+
+**Save the tokens:**
+```bash
+export ACCESS_TOKEN="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+export REFRESH_TOKEN="a1b2c3d4e5f6g7h8i9j0k1l2m3n4o5p6q7r8s9t0..."
+```
+
+**Verify tokens in database:**
+```bash
+mongosh insurematch
+
+db.users.findOne(
+  { email: "testuser@example.com" },
+  { refreshToken: 1, refreshTokenExpires: 1 }
+)
+```
+
+**Expected:**
+- `refreshToken` should be stored in the database
+- `refreshTokenExpires` should be 7 days from now
+
+### Test 2: Login with Invalid Email
+
+**Request:**
+```bash
+curl -X POST http://localhost:5000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "nonexistent@example.com",
+    "password": "SecurePass123"
+  }'
+```
+
+**Expected Response (401):**
+```json
+{
+  "success": false,
+  "message": "Invalid email or password"
+}
+```
+
+### Test 3: Login with Invalid Password
+
+**Request:**
+```bash
+curl -X POST http://localhost:5000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "testuser@example.com",
+    "password": "WrongPassword123"
+  }'
+```
+
+**Expected Response (401):**
+```json
+{
+  "success": false,
+  "message": "Invalid email or password"
+}
+```
+
+### Test 4: Login with Unverified Email
+
+**Create an unverified user first, then:**
+
+**Request:**
+```bash
+curl -X POST http://localhost:5000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "unverified@example.com",
+    "password": "SecurePass123"
+  }'
+```
+
+**Expected Response (401):**
+```json
+{
+  "success": false,
+  "message": "Please verify your email before logging in",
+  "requiresVerification": true
+}
+```
+
+## Part 3: Using Access Tokens
+
+### Test 5: Access Protected Route with Valid Token
+
+**Request:**
+```bash
+curl -X POST http://localhost:5000/api/auth/logout \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json"
+```
+
+**Expected Response (200):**
+```json
+{
+  "success": true,
+  "message": "Logout successful"
+}
+```
+
+### Test 6: Access Protected Route Without Token
+
+**Request:**
+```bash
+curl -X POST http://localhost:5000/api/auth/logout \
+  -H "Content-Type: application/json"
+```
+
+**Expected Response (401):**
+```json
+{
+  "success": false,
+  "message": "Access denied. No token provided."
+}
+```
+
+### Test 7: Access Protected Route with Invalid Token
+
+**Request:**
+```bash
+curl -X POST http://localhost:5000/api/auth/logout \
+  -H "Authorization: Bearer invalid.token.here" \
+  -H "Content-Type: application/json"
+```
+
+**Expected Response (401):**
+```json
+{
+  "success": false,
+  "message": "Invalid token."
+}
+```
+
+## Part 4: Token Refresh Flow
+
+### Test 8: Refresh Token with Valid Refresh Token
+
+**Request:**
+```bash
+curl -X POST http://localhost:5000/api/auth/refresh-token \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"refreshToken\": \"$REFRESH_TOKEN\"
+  }"
+```
+
+**Expected Response (200):**
+```json
+{
+  "success": true,
+  "message": "Token refreshed successfully",
+  "data": {
+    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.NEW_ACCESS_TOKEN...",
+    "refreshToken": "NEW_REFRESH_TOKEN_DIFFERENT_FROM_OLD_ONE..."
+  }
+}
+```
+
+**Important observations:**
+- ✅ New access token is returned
+- ✅ **New refresh token is returned** (rotation)
+- ✅ Old refresh token is now invalid
+
+**Verify in database:**
+```bash
+mongosh insurematch
+
+db.users.findOne(
+  { email: "testuser@example.com" },
+  { refreshToken: 1 }
+)
+```
+
+**Expected:** The `refreshToken` in database should match the NEW refresh token, not the old one.
+
+### Test 9: Try Using Old Refresh Token (Should Fail)
+
+**Request:**
+```bash
+curl -X POST http://localhost:5000/api/auth/refresh-token \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"refreshToken\": \"$REFRESH_TOKEN\"
+  }"
+```
+
+**Expected Response (401):**
+```json
+{
+  "success": false,
+  "message": "Invalid or expired refresh token"
+}
+```
+
+**This confirms token rotation is working correctly!**
+
+### Test 10: Refresh Token with Invalid Token
+
+**Request:**
+```bash
+curl -X POST http://localhost:5000/api/auth/refresh-token \
+  -H "Content-Type: application/json" \
+  -d '{
+    "refreshToken": "invalid-token-12345"
+  }'
+```
+
+**Expected Response (401):**
+```json
+{
+  "success": false,
+  "message": "Invalid or expired refresh token"
+}
+```
+
+### Test 11: Refresh Token After It Expires
+
+**To test expiration, manually update the database:**
+
+```bash
+mongosh insurematch
+
+db.users.updateOne(
+  { email: "testuser@example.com" },
+  { $set: { refreshTokenExpires: new Date("2020-01-01") } }
+)
+```
+
+**Then try to refresh:**
+```bash
+curl -X POST http://localhost:5000/api/auth/refresh-token \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"refreshToken\": \"YOUR_VALID_TOKEN\"
+  }"
+```
+
+**Expected Response (401):**
+```json
+{
+  "success": false,
+  "message": "Invalid or expired refresh token"
+}
+```
+
+## Part 5: Access Token Expiration Testing
+
+### Test 12: Wait for Access Token to Expire
+
+**Note:** By default, access tokens expire in 15 minutes. For faster testing, you can:
+
+**Option A: Change expiration to 1 minute in .env:**
+```env
+JWT_ACCESS_EXPIRES_IN=1m
+```
+
+**Option B: Use a tool to generate an expired token manually**
+
+**After token expires, try to access protected route:**
+```bash
+curl -X POST http://localhost:5000/api/auth/logout \
+  -H "Authorization: Bearer $EXPIRED_ACCESS_TOKEN" \
+  -H "Content-Type: application/json"
+```
+
+**Expected Response (401):**
+```json
+{
+  "success": false,
+  "message": "Token expired."
+}
+```
+
+**Then refresh the token:**
+```bash
+curl -X POST http://localhost:5000/api/auth/refresh-token \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"refreshToken\": \"$REFRESH_TOKEN\"
+  }"
+```
+
+**Use the new access token to retry the request.**
+
+## Part 6: Logout Testing
+
+### Test 13: Logout (Invalidates Refresh Token)
+
+**Request:**
+```bash
+curl -X POST http://localhost:5000/api/auth/logout \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json"
+```
+
+**Expected Response (200):**
+```json
+{
+  "success": true,
+  "message": "Logout successful"
+}
+```
+
+**Verify in database:**
+```bash
+mongosh insurematch
+
+db.users.findOne(
+  { email: "testuser@example.com" },
+  { refreshToken: 1, refreshTokenExpires: 1 }
+)
+```
+
+**Expected:**
+- `refreshToken` should be `null`
+- `refreshTokenExpires` should be `null`
+
+### Test 14: Try to Refresh After Logout
+
+**Request:**
+```bash
+curl -X POST http://localhost:5000/api/auth/refresh-token \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"refreshToken\": \"$REFRESH_TOKEN\"
+  }"
+```
+
+**Expected Response (401):**
+```json
+{
+  "success": false,
+  "message": "Invalid or expired refresh token"
+}
+```
+
+## Part 7: Complete Authentication Flow Test
+
+### Full Flow Test Sequence
+
+1. **Register** → Get user ID
+2. **Verify Email** → Get initial access token
+3. **Login** → Get access token + refresh token
+4. **Use Access Token** → Access protected routes
+5. **Wait for Expiration** (or set short expiry) → Access token expires
+6. **Refresh Token** → Get new access token + new refresh token
+7. **Use New Access Token** → Access protected routes successfully
+8. **Logout** → Refresh token invalidated
+9. **Try to Refresh** → Should fail
+
+**Automated Test Script (Bash):**
+
+```bash
+#!/bin/bash
+
+BASE_URL="http://localhost:5000"
+EMAIL="flowtest@example.com"
+PASSWORD="SecurePass123"
+
+echo "1. Registering user..."
+REGISTER_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/register" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"email\": \"$EMAIL\",
+    \"password\": \"$PASSWORD\",
+    \"name\": \"Flow Test User\",
+    \"dateOfBirth\": \"1995-05-15\"
+  }")
+
+echo $REGISTER_RESPONSE | jq '.'
+
+echo "\n2. Check console for verification code, then verify email..."
+read -p "Enter verification code: " CODE
+
+VERIFY_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/verify-email" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"email\": \"$EMAIL\",
+    \"verificationCode\": \"$CODE\"
+  }")
+
+echo $VERIFY_RESPONSE | jq '.'
+
+echo "\n3. Logging in..."
+LOGIN_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"email\": \"$EMAIL\",
+    \"password\": \"$PASSWORD\"
+  }")
+
+ACCESS_TOKEN=$(echo $LOGIN_RESPONSE | jq -r '.data.accessToken')
+REFRESH_TOKEN=$(echo $LOGIN_RESPONSE | jq -r '.data.refreshToken')
+
+echo "Access Token: $ACCESS_TOKEN"
+echo "Refresh Token: $REFRESH_TOKEN"
+
+echo "\n4. Using access token to access protected route..."
+PROTECTED_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/logout" \
+  -H "Authorization: Bearer $ACCESS_TOKEN" \
+  -H "Content-Type: application/json")
+
+# This will logout, so we need to login again
+
+echo "\n5. Login again for refresh test..."
+LOGIN_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/login" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"email\": \"$EMAIL\",
+    \"password\": \"$PASSWORD\"
+  }")
+
+REFRESH_TOKEN=$(echo $LOGIN_RESPONSE | jq -r '.data.refreshToken')
+
+echo "\n6. Refreshing token..."
+REFRESH_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/refresh-token" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"refreshToken\": \"$REFRESH_TOKEN\"
+  }")
+
+echo $REFRESH_RESPONSE | jq '.'
+
+NEW_ACCESS_TOKEN=$(echo $REFRESH_RESPONSE | jq -r '.data.accessToken')
+NEW_REFRESH_TOKEN=$(echo $REFRESH_RESPONSE | jq -r '.data.refreshToken')
+
+echo "\n7. Trying old refresh token (should fail)..."
+OLD_REFRESH_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/refresh-token" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"refreshToken\": \"$REFRESH_TOKEN\"
+  }")
+
+echo $OLD_REFRESH_RESPONSE | jq '.'
+
+echo "\n8. Using new access token..."
+LOGOUT_RESPONSE=$(curl -s -X POST "$BASE_URL/api/auth/logout" \
+  -H "Authorization: Bearer $NEW_ACCESS_TOKEN" \
+  -H "Content-Type: application/json")
+
+echo $LOGOUT_RESPONSE | jq '.'
+
+echo "\n9. Trying to refresh after logout (should fail)..."
+FINAL_REFRESH=$(curl -s -X POST "$BASE_URL/api/auth/refresh-token" \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"refreshToken\": \"$NEW_REFRESH_TOKEN\"
+  }")
+
+echo $FINAL_REFRESH | jq '.'
+
+echo "\n✅ Complete flow test finished!"
+```
+
+## Part 8: Test Case Matrix
+
+| # | Test Case | Expected Status | Expected Result |
+|---|-----------|----------------|-----------------|
+| 1 | Login with valid credentials | 200 | Access + refresh tokens returned |
+| 2 | Login with invalid email | 401 | "Invalid email or password" |
+| 3 | Login with invalid password | 401 | "Invalid email or password" |
+| 4 | Login with unverified email | 401 | "Please verify your email" |
+| 5 | Access protected route with valid token | 200 | Success |
+| 6 | Access protected route without token | 401 | "No token provided" |
+| 7 | Access protected route with invalid token | 401 | "Invalid token" |
+| 8 | Access protected route with expired token | 401 | "Token expired" |
+| 9 | Refresh with valid refresh token | 200 | New tokens returned |
+| 10 | Refresh with invalid refresh token | 401 | "Invalid or expired refresh token" |
+| 11 | Refresh with expired refresh token | 401 | "Invalid or expired refresh token" |
+| 12 | Use old refresh token after rotation | 401 | "Invalid or expired refresh token" |
+| 13 | Logout with valid token | 200 | "Logout successful" |
+| 14 | Refresh after logout | 401 | "Invalid or expired refresh token" |
+
+## Part 9: Security Verification
+
+### Verify Token Rotation
+```bash
+# Login
+LOGIN1=$(curl -s -X POST http://localhost:5000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "test@example.com", "password": "Pass123"}')
+
+RT1=$(echo $LOGIN1 | jq -r '.data.refreshToken')
+
+# Refresh
+REFRESH1=$(curl -s -X POST http://localhost:5000/api/auth/refresh-token \
+  -H "Content-Type: application/json" \
+  -d "{\"refreshToken\": \"$RT1\"}")
+
+RT2=$(echo $REFRESH1 | jq -r '.data.refreshToken')
+
+# Verify RT1 != RT2
+if [ "$RT1" != "$RT2" ]; then
+  echo "✅ Token rotation confirmed: Tokens are different"
+else
+  echo "❌ Token rotation failed: Tokens are the same"
+fi
+
+# Verify RT1 is now invalid
+OLD_REFRESH=$(curl -s -X POST http://localhost:5000/api/auth/refresh-token \
+  -H "Content-Type: application/json" \
+  -d "{\"refreshToken\": \"$RT1\"}")
+
+if echo $OLD_REFRESH | grep -q "Invalid or expired"; then
+  echo "✅ Old token invalidated correctly"
+else
+  echo "❌ Old token still valid (security issue!)"
+fi
+```
+
+## Part 10: Performance Testing
+
+### Test Token Generation Speed
+```bash
+time for i in {1..100}; do
+  curl -s -X POST http://localhost:5000/api/auth/login \
+    -H "Content-Type: application/json" \
+    -d '{"email": "test@example.com", "password": "Pass123"}' > /dev/null
+done
+```
+
+## Troubleshooting
+
+### Issue: "Token expired" immediately after login
+- Check `JWT_ACCESS_EXPIRES_IN` in .env
+- Ensure server time is correct (sync with NTP)
+- Verify no time zone issues
+
+### Issue: Refresh token not rotating
+- Check database after refresh - `refreshToken` should change
+- Verify the response includes a new `refreshToken`
+- Check server logs for errors during token save
+
+### Issue: "Invalid refresh token" even with valid token
+- Verify token matches exactly (no extra spaces/newlines)
+- Check database - ensure `refreshToken` and `refreshTokenExpires` are set
+- Verify token hasn't expired in database
+
+### Issue: Access token still works after expiration time
+- JWT expiration is built into the token itself
+- Server must reject expired tokens (middleware checks)
+- Verify `JWT_ACCESS_EXPIRES_IN` is being used correctly
+
+## Success Criteria Checklist
+
+- [ ] User can login and receive both access and refresh tokens
+- [ ] Access token expires after configured time (default 15 minutes)
+- [ ] Refresh token expires after configured time (default 7 days)
+- [ ] Refresh token can be used to get new access token
+- [ ] Refresh token is rotated on each use (old token invalidated)
+- [ ] Old refresh token cannot be reused
+- [ ] Logout invalidates refresh token
+- [ ] Cannot refresh after logout
+- [ ] Protected routes require valid access token
+- [ ] Expired access tokens are rejected
+- [ ] Invalid tokens are rejected
+- [ ] Unverified users cannot login
+- [ ] Error messages are clear and appropriate
+
+## Clean Up
+
+```bash
+# Remove test users
+mongosh insurematch
+
+db.users.deleteMany({
+  email: { $regex: "test" }
+})
+```
+
+## Next Steps
+
+After successful testing:
+1. Implement frontend integration
+2. Add rate limiting to auth endpoints
+3. Implement account lockout after failed attempts
+4. Add multi-device session management
+5. Implement "remember me" functionality
+6. Add password reset flow
+7. Consider adding multi-factor authentication (MFA)

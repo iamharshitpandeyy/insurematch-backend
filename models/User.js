@@ -73,6 +73,14 @@ const userSchema = new mongoose.Schema({
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Insurer',
     default: null
+  },
+  refreshToken: {
+    type: String,
+    default: null
+  },
+  refreshTokenExpires: {
+    type: Date,
+    default: null
   }
 }, {
   timestamps: true
@@ -139,6 +147,34 @@ userSchema.methods.verifyInvitationToken = function(token) {
   }
 
   return this.invitationToken === token;
+};
+
+// Method to generate and store refresh token
+userSchema.methods.generateRefreshToken = function() {
+  const crypto = require('crypto');
+  const token = crypto.randomBytes(40).toString('hex');
+  this.refreshToken = token;
+  this.refreshTokenExpires = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+  return token;
+};
+
+// Method to verify refresh token
+userSchema.methods.verifyRefreshToken = function(token) {
+  if (!this.refreshToken || !this.refreshTokenExpires) {
+    return false;
+  }
+
+  if (this.refreshTokenExpires < new Date()) {
+    return false;
+  }
+
+  return this.refreshToken === token;
+};
+
+// Method to clear refresh token
+userSchema.methods.clearRefreshToken = function() {
+  this.refreshToken = null;
+  this.refreshTokenExpires = null;
 };
 
 const User = mongoose.model('User', userSchema);

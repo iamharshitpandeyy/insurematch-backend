@@ -4,16 +4,25 @@ const User = require('../models/User');
 const { sendVerificationEmail, sendWelcomeEmail, sendInvitationEmail } = require('../utils/emailService');
 
 /**
- * Generate JWT token
+ * Generate JWT access token
+ * @param {string} userId - User ID
+ * @returns {string} - JWT access token
+ */
+const generateAccessToken = (userId) => {
+  return jwt.sign(
+    { userId },
+    process.env.JWT_SECRET || 'your-secret-key-change-in-production',
+    { expiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m' }
+  );
+};
+
+/**
+ * Generate JWT token (legacy - for backward compatibility)
  * @param {string} userId - User ID
  * @returns {string} - JWT token
  */
 const generateToken = (userId) => {
-  return jwt.sign(
-    { userId },
-    process.env.JWT_SECRET || 'your-secret-key-change-in-production',
-    { expiresIn: process.env.JWT_EXPIRES_IN || '7d' }
-  );
+  return generateAccessToken(userId);
 };
 
 /**
@@ -564,6 +573,195 @@ const acceptInvitation = async (req, res) => {
   }
 };
 
+/**
+ * Login user
+ * POST /api/auth/login
+ */
+const login = async (req, res) => {
+  try {
+    // Validate request
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        errors: errors.array()
+      });
+    }
+
+    const { email, password } = req.body;
+
+    // Find user by email
+    const user = await User.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password'
+      });
+    }
+
+    // Check if email is verified
+    if (!user.isEmailVerified) {
+      return res.status(401).json({
+        success: false,
+        message: 'Please verify your email before logging in',
+        requiresVerification: true
+      });
+    }
+
+    // Verify password
+    const isPasswordValid = await user.comparePassword(password);
+
+    if (!isPasswordValid) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid email or password'
+      });
+    }
+
+    // Generate access token (short expiration: 15 minutes)
+    const accessToken = generateAccessToken(user._id);
+
+    // Generate refresh token (long expiration: 7 days)
+    const refreshToken = user.generateRefreshToken();
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Login successful',
+      data: {
+        accessToken,
+        refreshToken,
+        user: {
+          id: user._id,
+          email: user.email,
+          name: user.name,
+          dateOfBirth: user.dateOfBirth,
+          role: user.role,
+          isEmailVerified: user.isEmailVerified
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Login error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'An error occurred during login. Please try again.'
+    });
+  }
+};
+
+/**
+ * Refresh access token using refresh token
+ * POST /api/auth/refresh-token
+ */
+const refreshToken = async (req, res) => {
+  try {
+    // Validate request
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        errors: errors.array()
+      });
+    }
+
+    const { refreshToken: token } = req.body;
+
+    // Decode the refresh token to get user ID without verification
+    // We'll verify it against the stored token in the database
+    let userId;
+    try {
+      // We'll need to find the user by searching for the token
+      const user = await User.findOne({
+        refreshToken: token,
+        refreshTokenExpires: { $gt: new Date() }
+      });
+
+      if (!user) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid or expired refresh token'
+        });
+      }
+
+      userId = user._id;
+
+      // Verify the refresh token
+      if (!user.verifyRefreshToken(token)) {
+        return res.status(401).json({
+          success: false,
+          message: 'Invalid or expired refresh token'
+        });
+      }
+
+      // Generate new access token
+      const newAccessToken = generateAccessToken(user._id);
+
+      // Rotate refresh token (generate new refresh token)
+      const newRefreshToken = user.generateRefreshToken();
+      await user.save();
+
+      res.status(200).json({
+        success: true,
+        message: 'Token refreshed successfully',
+        data: {
+          accessToken: newAccessToken,
+          refreshToken: newRefreshToken
+        }
+      });
+    } catch (error) {
+      console.error('Token refresh error:', error);
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid or expired refresh token'
+      });
+    }
+  } catch (error) {
+    console.error('Token refresh error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'An error occurred while refreshing token. Please try again.'
+    });
+  }
+};
+
+/**
+ * Logout user (invalidate refresh token)
+ * POST /api/auth/logout
+ */
+const logout = async (req, res) => {
+  try {
+    // req.user is set by the authenticate middleware
+    const user = await User.findById(req.user._id);
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Clear refresh token
+    user.clearRefreshToken();
+    await user.save();
+
+    res.status(200).json({
+      success: true,
+      message: 'Logout successful'
+    });
+  } catch (error) {
+    console.error('Logout error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'An error occurred during logout. Please try again.'
+    });
+  }
+};
+
 module.exports = {
   register,
   verifyEmail,
@@ -571,5 +769,8 @@ module.exports = {
   createPlatformAdmin,
   inviteInsurerAdmin,
   inviteInsurerAgent,
-  acceptInvitation
+  acceptInvitation,
+  login,
+  refreshToken,
+  logout
 };

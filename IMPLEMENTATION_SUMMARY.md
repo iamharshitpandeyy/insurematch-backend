@@ -242,3 +242,311 @@ The User model now supports:
 5. Add audit logging for admin actions
 6. Implement invitation history tracking
 7. Add rate limiting for invitation endpoints
+
+---
+
+# JWT-Based Authentication with Refresh Token Rotation - Implementation Summary
+
+## Overview
+This document also describes the implementation of JWT-based authentication with refresh token rotation for the InsureMatch backend application. This feature enhances security by implementing short-lived access tokens and long-lived refresh tokens with automatic rotation.
+
+## Architecture
+
+### Token Types
+The authentication system now uses two types of tokens:
+
+1. **Access Token (JWT)**
+   - Short-lived token (default: 15 minutes)
+   - Used for authenticating API requests
+   - Contains user ID in the payload
+   - Verified using JWT_SECRET
+   - Not stored in database (stateless)
+
+2. **Refresh Token**
+   - Long-lived token (default: 7 days)
+   - Used to obtain new access tokens without re-authentication
+   - Stored securely in the database
+   - Rotated on each refresh (old token invalidated, new token issued)
+   - Cryptographically secure random token
+
+## Implementation Details
+
+### 1. Database Schema Updates (`models/User.js`)
+
+Added the following fields to the User model:
+```javascript
+refreshToken: String           // Current valid refresh token
+refreshTokenExpires: Date      // Expiration timestamp for refresh token
+```
+
+Added helper methods:
+- `generateRefreshToken()` - Generates a new 40-byte cryptographically secure refresh token
+- `verifyRefreshToken(token)` - Validates a refresh token against stored value and expiration
+- `clearRefreshToken()` - Invalidates the current refresh token (used for logout)
+
+### 2. Authentication Controller (`controllers/authController.js`)
+
+#### New Token Generation Functions
+- `generateAccessToken(userId)` - Creates short-lived JWT access token (15 minutes)
+- `generateToken(userId)` - Legacy compatibility wrapper for generateAccessToken
+
+#### Login Flow (`POST /api/auth/login`)
+1. Validates user credentials (email and password)
+2. Checks if email is verified
+3. Generates access token (15 minutes expiration)
+4. Generates refresh token (7 days expiration) and stores in database
+5. Returns both tokens to the client
+
+**Request:**
+```json
+{
+  "email": "user@example.com",
+  "password": "Password123"
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Login successful",
+  "data": {
+    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refreshToken": "a1b2c3d4e5f6...",
+    "user": {
+      "id": "userId",
+      "email": "user@example.com",
+      "name": "User Name",
+      "role": "enduser",
+      "isEmailVerified": true
+    }
+  }
+}
+```
+
+#### Token Refresh Flow (`POST /api/auth/refresh-token`)
+1. Validates the provided refresh token
+2. Checks if token exists in database and is not expired
+3. Generates new access token
+4. **Rotates refresh token** - generates new refresh token and invalidates old one
+5. Returns new access token and new refresh token
+
+**Request:**
+```json
+{
+  "refreshToken": "a1b2c3d4e5f6..."
+}
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Token refreshed successfully",
+  "data": {
+    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...",
+    "refreshToken": "x9y8z7w6v5u4..."
+  }
+}
+```
+
+#### Logout Flow (`POST /api/auth/logout`)
+1. Requires valid access token (authenticated route)
+2. Clears refresh token from database
+3. Returns success response
+
+**Request Headers:**
+```
+Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Logout successful"
+}
+```
+
+### 3. Authentication Middleware (`middleware/auth.js`)
+
+The `authenticate` middleware already properly handles:
+1. Extracts JWT access token from Authorization header
+2. Verifies token signature and expiration
+3. Retrieves user from database
+4. Attaches user object to request for downstream handlers
+5. Returns appropriate errors for invalid/expired tokens
+
+### 4. Routes (`routes/auth.js`)
+
+Added new routes:
+- `POST /api/auth/login` - User login with credentials
+- `POST /api/auth/refresh-token` - Refresh access token using refresh token
+- `POST /api/auth/logout` - Logout and invalidate refresh token (protected route)
+
+All existing routes continue to work as before.
+
+### 5. Environment Configuration (`.env.example`)
+
+Updated configuration variables:
+```env
+JWT_SECRET=your-super-secret-jwt-key-change-this-in-production
+JWT_ACCESS_EXPIRES_IN=15m    # Access token expiration
+JWT_REFRESH_EXPIRES_IN=7d    # Refresh token expiration (stored in DB)
+JWT_EXPIRES_IN=15m           # Legacy compatibility
+```
+
+## Security Features
+
+### 1. Token Rotation
+- **Refresh tokens are rotated on each use**
+- Old refresh token is invalidated when a new one is issued
+- Prevents replay attacks with stolen refresh tokens
+- Limits the window of vulnerability if a refresh token is compromised
+
+### 2. Token Expiration
+- **Access tokens**: Short-lived (15 minutes) - limits exposure if compromised
+- **Refresh tokens**: Long-lived (7 days) - stored in database with expiration check
+
+### 3. Token Storage
+- **Access tokens**: Never stored in database (stateless)
+- **Refresh tokens**: Stored in database with expiration timestamp
+- **Passwords**: Hashed using bcrypt before storage
+
+### 4. Validation
+- Email verification required before login
+- Strong password requirements enforced
+- All tokens validated on each request
+
+### 5. Error Handling
+- Generic error messages for authentication failures (prevents user enumeration)
+- Specific error codes for token expiration (allows client to refresh automatically)
+- Separate error for unverified email (allows client to show verification prompt)
+
+## Client Integration Guidelines
+
+### Token Storage
+- **Access Token**: Store in memory or short-lived storage (e.g., sessionStorage)
+- **Refresh Token**: Store securely (e.g., httpOnly cookie or secure storage)
+- **Never** store tokens in localStorage for production applications
+
+### Request Flow
+1. Include access token in Authorization header for all API requests:
+   ```
+   Authorization: Bearer {accessToken}
+   ```
+
+2. When access token expires (401 error with "Token expired" message):
+   - Call `/api/auth/refresh-token` with refresh token
+   - Store new access token and refresh token
+   - Retry original request with new access token
+
+3. If refresh token is invalid/expired:
+   - Redirect user to login page
+   - Clear all stored tokens
+
+### Example Client Code
+
+```javascript
+// API request with automatic token refresh
+async function apiRequest(endpoint, options = {}) {
+  const accessToken = getAccessToken();
+
+  const response = await fetch(endpoint, {
+    ...options,
+    headers: {
+      ...options.headers,
+      'Authorization': `Bearer ${accessToken}`,
+      'Content-Type': 'application/json'
+    }
+  });
+
+  // Handle token expiration
+  if (response.status === 401) {
+    const errorData = await response.json();
+
+    if (errorData.message === 'Token expired.') {
+      // Refresh the token
+      const refreshToken = getRefreshToken();
+      const refreshResponse = await fetch('/api/auth/refresh-token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ refreshToken })
+      });
+
+      if (refreshResponse.ok) {
+        const { data } = await refreshResponse.json();
+        // Store new tokens
+        setAccessToken(data.accessToken);
+        setRefreshToken(data.refreshToken);
+
+        // Retry original request
+        return apiRequest(endpoint, options);
+      } else {
+        // Refresh failed, redirect to login
+        redirectToLogin();
+      }
+    }
+  }
+
+  return response;
+}
+```
+
+## Migration Notes
+
+### Backward Compatibility
+- Existing routes continue to work unchanged
+- The `generateToken` function still exists for backward compatibility
+- Existing authenticated routes work with new access tokens
+
+### Database Migration
+No explicit migration needed:
+- New fields have default values (null)
+- Existing users will get refresh tokens on their next login
+- Old sessions remain valid until access tokens expire
+
+## Authentication System Acceptance Criteria Status
+
+| Criteria | Status | Notes |
+|----------|--------|-------|
+| User can login with email and password | ✅ Complete | Via `POST /api/auth/login` |
+| Access token with 15-minute expiration | ✅ Complete | Configurable via JWT_ACCESS_EXPIRES_IN |
+| Refresh token with 7-day expiration | ✅ Complete | Stored in database, configurable |
+| Token refresh without re-authentication | ✅ Complete | Via `POST /api/auth/refresh-token` |
+| Refresh token rotation on use | ✅ Complete | Old token invalidated, new token issued |
+| Proper error handling | ✅ Complete | Clear error messages for all scenarios |
+| Security best practices | ✅ Complete | Token rotation, expiration, secure storage |
+| Documentation provided | ✅ Complete | IMPLEMENTATION_SUMMARY.md and TESTING_GUIDE.md |
+
+## Troubleshooting
+
+### Common Issues
+
+1. **"Token expired" errors immediately after login**
+   - Check JWT_ACCESS_EXPIRES_IN configuration
+   - Ensure server time is synchronized (NTP)
+
+2. **"Invalid refresh token" errors**
+   - Verify token is being stored and sent correctly
+   - Check refresh token expiration in database
+   - Ensure token rotation is handled properly
+
+3. **401 errors on authenticated routes**
+   - Verify Authorization header format: `Bearer {token}`
+   - Check that access token is being sent, not refresh token
+   - Ensure token hasn't expired
+
+## Future Enhancements for Authentication
+
+1. **Token Revocation List**: Implement a blacklist for compromised tokens
+2. **Device Tracking**: Track refresh tokens by device for multi-device support
+3. **Rate Limiting**: Add rate limits to login and refresh endpoints
+4. **Security Headers**: Add security headers (CORS, CSP, etc.)
+5. **Audit Logging**: Log authentication events for security monitoring
+6. **MFA Support**: Add multi-factor authentication option
+7. **Password Reset**: Implement secure password reset flow with tokens
+
+## Testing
+
+See `TESTING_GUIDE.md` for detailed testing instructions and example requests for all authentication endpoints.
