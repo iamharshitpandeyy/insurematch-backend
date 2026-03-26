@@ -1,7 +1,7 @@
 const jwt = require('jsonwebtoken');
 const { validationResult } = require('express-validator');
 const User = require('../models/User');
-const { sendVerificationEmail, sendWelcomeEmail } = require('../utils/emailService');
+const { sendVerificationEmail, sendWelcomeEmail, sendInvitationEmail } = require('../utils/emailService');
 
 /**
  * Generate JWT token
@@ -254,8 +254,322 @@ const resendVerification = async (req, res) => {
   }
 };
 
+/**
+ * Create a Platform Admin account
+ * POST /api/auth/admin/create-platform-admin
+ */
+const createPlatformAdmin = async (req, res) => {
+  try {
+    // Validate request
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        errors: errors.array()
+      });
+    }
+
+    const { email, password, name } = req.body;
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'An account with this email already exists'
+      });
+    }
+
+    // Create new platform admin
+    const admin = new User({
+      email: email.toLowerCase(),
+      password,
+      name,
+      role: 'platform_admin',
+      isEmailVerified: true, // Platform admins are pre-verified
+      dateOfBirth: new Date('1990-01-01') // Placeholder date for admin accounts
+    });
+
+    await admin.save();
+
+    // Return success response
+    res.status(201).json({
+      success: true,
+      message: 'Platform Admin account created successfully',
+      data: {
+        userId: admin._id,
+        email: admin.email,
+        name: admin.name,
+        role: admin.role
+      }
+    });
+  } catch (error) {
+    console.error('Create Platform Admin error:', error);
+
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: messages
+      });
+    }
+
+    if (error.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        message: 'An account with this email already exists'
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'An error occurred while creating the Platform Admin account'
+    });
+  }
+};
+
+/**
+ * Invite an Insurer Admin
+ * POST /api/auth/admin/invite-insurer-admin
+ */
+const inviteInsurerAdmin = async (req, res) => {
+  try {
+    // Validate request
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        errors: errors.array()
+      });
+    }
+
+    const { email, name, insurerId } = req.body;
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'An account with this email already exists'
+      });
+    }
+
+    // Create new insurer admin with pending status
+    const insurerAdmin = new User({
+      email: email.toLowerCase(),
+      password: Math.random().toString(36).slice(-16), // Temporary password
+      name,
+      role: 'insurer_admin',
+      isEmailVerified: false,
+      dateOfBirth: new Date('1990-01-01'), // Placeholder date for admin accounts
+      insurerId: insurerId || null
+    });
+
+    // Generate invitation token
+    const invitationToken = insurerAdmin.generateInvitationToken();
+    await insurerAdmin.save();
+
+    // Generate invitation link
+    const invitationLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/accept-invitation?token=${invitationToken}&email=${encodeURIComponent(email)}`;
+
+    // Send invitation email
+    try {
+      await sendInvitationEmail(email, name, invitationLink, 'Insurer Admin');
+    } catch (emailError) {
+      console.error('Error sending invitation email:', emailError);
+      // Continue even if email fails
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Invitation sent successfully to Insurer Admin',
+      data: {
+        userId: insurerAdmin._id,
+        email: insurerAdmin.email,
+        name: insurerAdmin.name,
+        role: insurerAdmin.role,
+        invitationLink,
+        expiresAt: insurerAdmin.invitationExpiresAt
+      }
+    });
+  } catch (error) {
+    console.error('Invite Insurer Admin error:', error);
+
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: messages
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'An error occurred while sending the invitation'
+    });
+  }
+};
+
+/**
+ * Invite an Insurer Agent
+ * POST /api/auth/admin/invite-insurer-agent
+ */
+const inviteInsurerAgent = async (req, res) => {
+  try {
+    // Validate request
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        errors: errors.array()
+      });
+    }
+
+    const { email, name, insurerId } = req.body;
+
+    // Check if user already exists
+    const existingUser = await User.findOne({ email: email.toLowerCase() });
+    if (existingUser) {
+      return res.status(400).json({
+        success: false,
+        message: 'An account with this email already exists'
+      });
+    }
+
+    // Create new insurer agent with pending status
+    const insurerAgent = new User({
+      email: email.toLowerCase(),
+      password: Math.random().toString(36).slice(-16), // Temporary password
+      name,
+      role: 'insurer_agent',
+      isEmailVerified: false,
+      dateOfBirth: new Date('1990-01-01'), // Placeholder date for agent accounts
+      insurerId: insurerId || null
+    });
+
+    // Generate invitation token
+    const invitationToken = insurerAgent.generateInvitationToken();
+    await insurerAgent.save();
+
+    // Generate invitation link
+    const invitationLink = `${process.env.FRONTEND_URL || 'http://localhost:3000'}/accept-invitation?token=${invitationToken}&email=${encodeURIComponent(email)}`;
+
+    // Send invitation email
+    try {
+      await sendInvitationEmail(email, name, invitationLink, 'Insurer Agent');
+    } catch (emailError) {
+      console.error('Error sending invitation email:', emailError);
+      // Continue even if email fails
+    }
+
+    res.status(201).json({
+      success: true,
+      message: 'Invitation sent successfully to Insurer Agent',
+      data: {
+        userId: insurerAgent._id,
+        email: insurerAgent.email,
+        name: insurerAgent.name,
+        role: insurerAgent.role,
+        invitationLink,
+        expiresAt: insurerAgent.invitationExpiresAt
+      }
+    });
+  } catch (error) {
+    console.error('Invite Insurer Agent error:', error);
+
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: messages
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'An error occurred while sending the invitation'
+    });
+  }
+};
+
+/**
+ * Accept invitation and set password
+ * POST /api/auth/accept-invitation
+ */
+const acceptInvitation = async (req, res) => {
+  try {
+    // Validate request
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        errors: errors.array()
+      });
+    }
+
+    const { email, token, password } = req.body;
+
+    // Find user by email
+    const user = await User.findOne({ email: email.toLowerCase() });
+
+    if (!user) {
+      return res.status(404).json({
+        success: false,
+        message: 'User not found'
+      });
+    }
+
+    // Check if invitation token is valid
+    if (!user.verifyInvitationToken(token)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid or expired invitation link. Invitation links expire after 48 hours.'
+      });
+    }
+
+    // Update password and activate account
+    user.password = password;
+    user.isEmailVerified = true;
+    user.invitationToken = null;
+    user.invitationExpiresAt = null;
+    await user.save();
+
+    // Generate JWT token
+    const authToken = generateToken(user._id);
+
+    res.status(200).json({
+      success: true,
+      message: 'Invitation accepted successfully! Your account is now active.',
+      data: {
+        token: authToken,
+        user: {
+          id: user._id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          isEmailVerified: user.isEmailVerified
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Accept invitation error:', error);
+
+    res.status(500).json({
+      success: false,
+      message: 'An error occurred while accepting the invitation'
+    });
+  }
+};
+
 module.exports = {
   register,
   verifyEmail,
-  resendVerification
+  resendVerification,
+  createPlatformAdmin,
+  inviteInsurerAdmin,
+  inviteInsurerAgent,
+  acceptInvitation
 };

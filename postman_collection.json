@@ -1,0 +1,214 @@
+{
+  "info": {
+    "name": "InsureMatch Admin API",
+    "description": "API collection for Platform Admin account creation and invitation flow",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Admin Operations",
+      "item": [
+        {
+          "name": "Create Platform Admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token from login"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"newadmin@insurematch.com\",\n  \"password\": \"SecurePass123\",\n  \"name\": \"New Platform Admin\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/admin/create-platform-admin",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "admin", "create-platform-admin"]
+            },
+            "description": "Creates a new Platform Admin account. Requires Platform Admin authentication."
+          }
+        },
+        {
+          "name": "Invite Insurer Admin",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token from login"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"insureradmin@example.com\",\n  \"name\": \"Insurer Admin\",\n  \"insurerId\": \"optional-insurer-id\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/admin/invite-insurer-admin",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "admin", "invite-insurer-admin"]
+            },
+            "description": "Sends invitation to Insurer Admin. Link expires in 48 hours. Requires Platform Admin authentication."
+          }
+        },
+        {
+          "name": "Invite Insurer Agent",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{jwt_token}}",
+                "description": "JWT token from login"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"agent@example.com\",\n  \"name\": \"Insurance Agent\",\n  \"insurerId\": \"optional-insurer-id\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/admin/invite-insurer-agent",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "admin", "invite-insurer-agent"]
+            },
+            "description": "Sends invitation to Insurer Agent. Link expires in 48 hours. Requires Platform Admin authentication."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Public Operations",
+      "item": [
+        {
+          "name": "Accept Invitation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"insureradmin@example.com\",\n  \"token\": \"invitation-token-from-email\",\n  \"password\": \"NewSecurePass123\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/accept-invitation",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "accept-invitation"]
+            },
+            "description": "Accepts invitation and sets password. Returns JWT token for immediate login. No authentication required."
+          }
+        },
+        {
+          "name": "Register End User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"password\": \"UserPass123\",\n  \"name\": \"John Doe\",\n  \"dateOfBirth\": \"1990-01-15\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/register",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "register"]
+            },
+            "description": "Register a new end user account. Sends verification code via email."
+          }
+        },
+        {
+          "name": "Verify Email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\",\n  \"verificationCode\": \"123456\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/verify-email",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "verify-email"]
+            },
+            "description": "Verify email with 6-digit code. Returns JWT token on success."
+          }
+        },
+        {
+          "name": "Resend Verification Code",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"user@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/auth/resend-verification",
+              "host": ["{{base_url}}"],
+              "path": ["api", "auth", "resend-verification"]
+            },
+            "description": "Resend verification code to user's email."
+          }
+        }
+      ]
+    },
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": ["{{base_url}}"],
+          "path": ["health"]
+        },
+        "description": "Check if the API is running"
+      }
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:5000",
+      "type": "string"
+    },
+    {
+      "key": "jwt_token",
+      "value": "",
+      "type": "string",
+      "description": "JWT token from login/verification - update this after authentication"
+    }
+  ]
+}

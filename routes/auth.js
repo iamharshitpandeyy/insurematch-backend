@@ -1,6 +1,15 @@
 const express = require('express');
 const { body } = require('express-validator');
-const { register, verifyEmail, resendVerification } = require('../controllers/authController');
+const {
+  register,
+  verifyEmail,
+  resendVerification,
+  createPlatformAdmin,
+  inviteInsurerAdmin,
+  inviteInsurerAgent,
+  acceptInvitation
+} = require('../controllers/authController');
+const { authenticate, authorize } = require('../middleware/auth');
 
 const router = express.Router();
 
@@ -91,6 +100,116 @@ router.post(
       .normalizeEmail()
   ],
   resendVerification
+);
+
+/**
+ * @route   POST /api/auth/admin/create-platform-admin
+ * @desc    Create a new Platform Admin account
+ * @access  Private (Platform Admin only)
+ */
+router.post(
+  '/admin/create-platform-admin',
+  authenticate,
+  authorize('platform_admin'),
+  [
+    body('email')
+      .isEmail()
+      .withMessage('Please provide a valid email address')
+      .normalizeEmail(),
+    body('password')
+      .isLength({ min: 8 })
+      .withMessage('Password must be at least 8 characters long')
+      .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
+      .withMessage('Password must contain at least one uppercase letter, one lowercase letter, and one number'),
+    body('name')
+      .trim()
+      .isLength({ min: 2 })
+      .withMessage('Name must be at least 2 characters long')
+      .matches(/^[a-zA-Z\s]+$/)
+      .withMessage('Name can only contain letters and spaces')
+  ],
+  createPlatformAdmin
+);
+
+/**
+ * @route   POST /api/auth/admin/invite-insurer-admin
+ * @desc    Invite an Insurer Admin
+ * @access  Private (Platform Admin only)
+ */
+router.post(
+  '/admin/invite-insurer-admin',
+  authenticate,
+  authorize('platform_admin'),
+  [
+    body('email')
+      .isEmail()
+      .withMessage('Please provide a valid email address')
+      .normalizeEmail(),
+    body('name')
+      .trim()
+      .isLength({ min: 2 })
+      .withMessage('Name must be at least 2 characters long')
+      .matches(/^[a-zA-Z\s]+$/)
+      .withMessage('Name can only contain letters and spaces'),
+    body('insurerId')
+      .optional()
+      .isMongoId()
+      .withMessage('Invalid insurer ID')
+  ],
+  inviteInsurerAdmin
+);
+
+/**
+ * @route   POST /api/auth/admin/invite-insurer-agent
+ * @desc    Invite an Insurer Agent
+ * @access  Private (Platform Admin only)
+ */
+router.post(
+  '/admin/invite-insurer-agent',
+  authenticate,
+  authorize('platform_admin'),
+  [
+    body('email')
+      .isEmail()
+      .withMessage('Please provide a valid email address')
+      .normalizeEmail(),
+    body('name')
+      .trim()
+      .isLength({ min: 2 })
+      .withMessage('Name must be at least 2 characters long')
+      .matches(/^[a-zA-Z\s]+$/)
+      .withMessage('Name can only contain letters and spaces'),
+    body('insurerId')
+      .optional()
+      .isMongoId()
+      .withMessage('Invalid insurer ID')
+  ],
+  inviteInsurerAgent
+);
+
+/**
+ * @route   POST /api/auth/accept-invitation
+ * @desc    Accept invitation and set password
+ * @access  Public
+ */
+router.post(
+  '/accept-invitation',
+  [
+    body('email')
+      .isEmail()
+      .withMessage('Please provide a valid email address')
+      .normalizeEmail(),
+    body('token')
+      .trim()
+      .notEmpty()
+      .withMessage('Invitation token is required'),
+    body('password')
+      .isLength({ min: 8 })
+      .withMessage('Password must be at least 8 characters long')
+      .matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)/)
+      .withMessage('Password must contain at least one uppercase letter, one lowercase letter, and one number')
+  ],
+  acceptInvitation
 );
 
 module.exports = router;
